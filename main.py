@@ -10,13 +10,11 @@ from bert4keras.layers import ConditionalRandomField
 from keras.layers import Dense
 from keras.models import Model
 from tqdm import tqdm
+
 import fairies as fa 
 
 # keras_version == 0.10.0
-
 maxlen = 256
-
-train_data = fa.read_json('train_data.json')
 
 table = fa.read_excel('schema.xlsx','工作表1')
 rowNum = table.nrows
@@ -30,9 +28,6 @@ for i in range(1,rowNum):
 o_list = list(set(o_list))
 o_list.insert(0,'i')
 o_list.insert(1,'o')
-
-print(o_list)
-print(len(o_list))
 
 o_list = ['i', 'o', '首都o_城市', '获奖o_作品', '邮政编码s_行政区', '所在城市o_城市', '毕业院校o_学校', '票房s_影视作品', '父亲s_人物', '专业代码s_学科专业', '国籍s_人物', '编剧s_影视作品', '成立日期o_Date', '专业代码o_Text', '主演s_影视作品', '获奖s_娱乐人物', '歌手s_歌曲', '主角s_文学作品', '官方语言o_语言', '校长o_人物', '所在城市s_景点', '主角o_人物', '简称o_Text', '主题曲o_歌曲', '获奖o_奖项', '母亲o_人物', '主演o_人物', '出品公司s_影视作品', '主持人o_人物', '上映时间o_Date', '校长s_学校', '作者s_图书作品', '朝代o_Text', '上映时间o_地点', '配音s_娱乐人物', '国籍o_国家', '妻子o_人物', '气候s_行政区', '朝代s_历史人物', '配音o_人物', '面积o_Number', '注册资本o_Number', '作词s_歌曲', '嘉宾o_人物', '简称s_机构', '作词o_人物', '总部地点o_地点', '丈夫s_人物', '出品公司o_企业', '面积s_行政区', '代言人s_企业/品牌', '票房o_Number', '创始人o_人物', '邮政编码o_Text', '所属专辑o_音乐专辑', '饰演o_人物', '作曲s_歌曲', '号o_Text', '成立日期s_机构', '获奖o_Date', '编剧o_人物', '所属专辑s_歌曲', '修业年限o_Number', '创始人s_企业', '人口数量o_Number', '占地面积s_机构', '嘉宾s_电视综艺', '导演s_影视作品', '丈夫o_人物', '主题曲s_影视作品', '歌手o_人物', '占地面积o_Number', '作者o_人物', '注册资本s_企业', '制片人o_人物', '祖籍o_地点', '制片人s_影视作品', '改编自s_影视作品', '人口数量s_行政区', '导演o_人物', '号s_历史人物', '饰演s_娱乐人物', '改编自o_作品', '代言人o_人物', '父亲o_人物', '海拔s_地点', '母亲s_人物', '毕业院校s_人物', '妻子s_人物', '作曲o_人物', '上映时间s_影视作品', '获奖o_Number', '票房o_地点', '官方语言s_国家', '主持人s_电视综艺', '祖籍s_人物', '首都s_国家', '董事长s_企业', '饰演o_影视作品', '修业年限s_学科专业', '配音o_影视作品', '董事长o_人物', '气候o_气候', '海拔o_Number', '总部地点s_企业']
 
@@ -60,7 +55,24 @@ def read_data(filename):
         res.append([text,predicts])
     return res        
 
+def get_dev_data(filename):
+
+    D = fa.read_json(filename)
+    res = []    
+    for i in D:
+        new = []
+        for pre in i['spo_list']:
+            S = pre['subject']
+            P = pre['predicate']
+            for j in pre['object_type']:
+                P = P +  '_'+ j
+                O = pre['object'][j]
+                new.append([S,P,O])
+        res.append(new) 
+    return res
+
 a = read_data('train_data.json')
+dev_data = get_dev_data('dev_data.json') 
 
 config_path = 'D:/lyh/model/chinese_L-12_H-768_A-12/bert_config.json'
 checkpoint_path = 'D:/lyh/model/chinese_L-12_H-768_A-12/bert_model.ckpt'
@@ -94,9 +106,7 @@ class data_generator(DataGenerator):
             predicts = result[1]
 
             token_ids, segment_ids = tokenizer.encode(text, maxlen=maxlen)
-
             seq_len = len(token_ids)
-
             labels = [[0] * num_labels for i in range(seq_len)]
 
             for predict in predicts:
@@ -169,7 +179,9 @@ def extract_arguments(text):
     token_ids = tokenizer.tokens_to_ids(tokens)
     segment_ids = [0] * len(token_ids)
     labels = model.predict([[token_ids], [segment_ids]])[0]
+    
     labels = labels[1:]
+    
     for lable in labels:
         for i in range(len(lable)):
             if lable[i] >= 0.5:
@@ -183,9 +195,9 @@ def extract_arguments(text):
 def find_entry(labels,mapping,text):
 
     # 分开o_res和s_res
+    # res = []
     o_res = []
     s_res = []
-
 
     for k,label in enumerate(labels):
         for i,l in enumerate(label):
@@ -213,19 +225,80 @@ def find_relation(s_entries, o_entries):
     for s_ in s_entries:
         s_type = s_[1][:s_[1].find('s_')]
         o_type = s_type + 'o_'
+        
         for o_ in o_entries:
             if o_type in o_[1]:
-                res.append([s_[0],o_[0],s_type])
 
+                o_value = o_[1].replace(o_type,'')
+
+                if s_type == '影视作品':
+                    if o_value == '地点':
+                        res.append([s_[0],s_type + '_inArea',o_[0]])
+                elif s_type == '饰演': 
+                    if o_value == '影视作品':
+                        res.append([s_[0],s_type + '_inWork',o_[0]])
+                elif s_type == '获奖':
+                    if o_value == '作品':
+                        res.append([s_[0],s_type + '_inWork',o_[0]])
+                    elif o_value == 'Date':
+                        res.append([s_[0],s_type + '_onDate',o_[0]])
+                    elif o_value == 'Number':
+                        res.append([s_[0],s_type + '_period',o_[0]])
+                elif s_type == '配音': 
+                    if o_value == '影视作品':
+                        res.append([s_[0],s_type + '_inWork',o_[0]])
+                elif s_type == '票房':
+                    if o_value == '地点':
+                        res.append([s_[0],s_type + '_inArea',o_[0]])
+                else:
+                    res.append([s_[0],s_type + '_@value',o_[0]])                    
     return res            
+
+def evaluate(filename):
+    
+    # 评估函数
+    D = fa.read_json(filename)
+
+    res = []
+    
+    for i in D:
+        text = i['text']
+        s_entries, o_entries = extract_arguments(text)        
+        new = find_relation(s_entries, o_entries)
+        res.append(new)
+    
+    X, Y, Z = 1, 0, 0 
+    for i in range(len(dev_data)):
+        
+        R = dev_data[i]
+        T = res[i]  
+        same = 0
+        for i in R:
+            if i in T:
+                same += 1
+        
+        X += same
+        Y += len(R)
+        Z += len(T)
+
+    f1, precision, recall = 2 * X / (Y + Z), X / Y, X / Z
+    print(f1)
+    print(precision)
+    print(recall)
+    return f1, precision, recall         
 
 class Evaluator(keras.callbacks.Callback):
     def __init__(self):
         self.best_val_acc = 0.
 
     def on_epoch_end(self, epoch, logs=None):
-        model.save_weights('best_model.weights')
-
+        val_acc,precision, recall = evaluate('dev_data.json')
+        model.save_weights('last_model.weights')
+        if val_acc > self.best_val_acc:
+            self.best_val_acc = val_acc
+            model.save_weights('best_model.weights')
+        print(val_acc)
+        print(self.best_val_acc)    
 
 evaluator = Evaluator()
 model.summary()
@@ -237,20 +310,5 @@ model.fit_generator(
     callbacks=[evaluator]
 )
 
-
 # model.load_weights('best_model.weights')
-
-# text_cases = fa.read_txt('text.txt')
-
-# final_res = []
-
-# for text_case in text_cases:
-
-#     s_entries, o_entries = extract_arguments(text_case)
-
-#     res = find_relation(s_entries, o_entries)
-
-#     final_res.append([text_case,res])
-
-# fa.write_json('final_res.json',final_res)
-        
+# evaluate('dev_data.json')
